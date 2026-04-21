@@ -1,17 +1,20 @@
-# verhuurapp
+# Lendly
 
-A new Flutter project.
+Een Flutter app om huishoudelijke toestellen te delen en te verhuren in je buurt.
 
-## Getting Started
+## Auteurs
+- Eleonor Mbala
+- Ertu Yazici
 
-This project is a starting point for a Flutter application.
+## Features
+- Registratie en login via Firebase
+- Toestellen toevoegen met foto en locatie
+- Toestellen zoeken en filteren op categorie
+- Reserveringen maken en beheren
+- Dashboard voor verhuurders
+- Google Maps integratie
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Technologieën
+- Flutter
+- Firebase (Auth, Firestore, Storage)
+- Google Maps
