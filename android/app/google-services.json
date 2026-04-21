@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "545836555152",
+    "project_id": "verhuurapp-2de31",
+    "storage_bucket": "verhuurapp-2de31.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:545836555152:android:9bba776bf921c9bf417115",
+        "android_client_info": {
+          "package_name": "com.example.verhuurapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUgzYXQjLlJ895ZPrEOVw_c9jiNQKUFQw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
