@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:verhuurapp/models/reservering.dart';
 import 'package:verhuurapp/services/reservering_service.dart';
 
+const _kBlue = Color(0xFF1E88E5);
+
 class MijnReserveringenScreen extends StatelessWidget {
   const MijnReserveringenScreen({super.key});
 
@@ -40,6 +42,9 @@ class MijnReserveringenScreen extends StatelessWidget {
             itemCount: reserveringen.length,
             itemBuilder: (context, index) {
               final reservering = reserveringen[index];
+              final kanAnnuleren = reservering.status == 'In afwachting' ||
+                  reservering.status == 'Goedgekeurd';
+
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 elevation: 2,
@@ -54,10 +59,12 @@ class MijnReserveringenScreen extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            reservering.toestelNaam,
-                            style: const TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
+                          Expanded(
+                            child: Text(
+                              reservering.toestelNaam,
+                              style: const TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
                           ),
                           _statusBadge(reservering.status),
                         ],
@@ -69,7 +76,7 @@ class MijnReserveringenScreen extends StatelessWidget {
                               size: 16, color: Colors.grey),
                           const SizedBox(width: 8),
                           Text(
-                            '${reservering.startDatum.day}/${reservering.startDatum.month}/${reservering.startDatum.year} → ${reservering.eindDatum.day}/${reservering.eindDatum.month}/${reservering.eindDatum.year}',
+                            '${_fmt(reservering.startDatum)} → ${_fmt(reservering.eindDatum)}',
                             style: const TextStyle(color: Colors.grey),
                           ),
                         ],
@@ -89,17 +96,66 @@ class MijnReserveringenScreen extends StatelessWidget {
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Icon(Icons.euro,
-                              size: 16, color: Colors.green),
+                          const Icon(Icons.euro, size: 16, color: _kBlue),
                           const SizedBox(width: 8),
                           Text(
                             '€${reservering.totalePrijs.toStringAsFixed(2)}',
                             style: const TextStyle(
-                                color: Colors.green,
+                                color: _kBlue,
                                 fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
+                      if (kanAnnuleren) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              final bevestigd = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Reservering annuleren'),
+                                  content: const Text(
+                                      'Weet je zeker dat je deze reservering wilt annuleren?'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Nee'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Ja, annuleren',
+                                          style:
+                                              TextStyle(color: Colors.red)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (bevestigd == true && context.mounted) {
+                                await reserveringService
+                                    .reserveringAnnuleren(reservering.id);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Reservering geannuleerd.'),
+                                      backgroundColor: Colors.orange,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.cancel, color: Colors.red),
+                            label: const Text('Annuleren',
+                                style: TextStyle(color: Colors.red)),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.red),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -110,6 +166,8 @@ class MijnReserveringenScreen extends StatelessWidget {
       ),
     );
   }
+
+  String _fmt(DateTime d) => '${d.day}/${d.month}/${d.year}';
 
   Widget _statusBadge(String status) {
     Color kleur;
@@ -133,7 +191,7 @@ class MijnReserveringenScreen extends StatelessWidget {
       ),
       child: Text(
         status,
-        style: TextStyle(color: kleur, fontWeight: FontWeight.bold),
+        style: TextStyle(color: kleur, fontWeight: FontWeight.bold, fontSize: 12),
       ),
     );
   }

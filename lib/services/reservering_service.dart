@@ -47,4 +47,22 @@ class ReserveringService {
         .doc(id)
         .update({'status': 'Geannuleerd'});
   }
+
+  // Actieve reserveringen voor een toestel ophalen (voor datumblokkering)
+  Future<List<Reservering>> getActieveReserveringenVoorToestel(String toestelId) async {
+    final snapshot = await _firestore
+        .collection(_collectie)
+        .where('toestelId', isEqualTo: toestelId)
+        .where('status', whereIn: ['In afwachting', 'Goedgekeurd'])
+        .get();
+    return snapshot.docs
+        .map((doc) => Reservering.fromFirestore(doc.data(), doc.id))
+        .toList();
+  }
+
+  // Controleer of er nog actieve reserveringen zijn voor een toestel
+  Future<bool> heeftActieveReserveringen(String toestelId) async {
+    final reserveringen = await getActieveReserveringenVoorToestel(toestelId);
+    return reserveringen.isNotEmpty;
+  }
 }

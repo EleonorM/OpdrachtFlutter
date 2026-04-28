@@ -22,7 +22,7 @@ class MyApp extends StatelessWidget {
       title: 'Lendly',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.lightBlue),
         useMaterial3: true,
       ),
       home: StreamBuilder<User?>(

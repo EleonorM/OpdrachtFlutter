@@ -10,6 +10,12 @@ class ToestelService {
     await _firestore.collection(_collectie).add(toestel.toFirestore());
   }
 
+  // Toestel toevoegen en ID teruggeven
+  Future<String> toestelToevoegenMetId(Toestel toestel) async {
+    final doc = await _firestore.collection(_collectie).add(toestel.toFirestore());
+    return doc.id;
+  }
+
   // Alle toestellen ophalen
   Stream<List<Toestel>> getAlleToestellen() {
     return _firestore

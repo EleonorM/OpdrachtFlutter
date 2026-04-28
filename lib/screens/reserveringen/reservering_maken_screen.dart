@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:verhuurapp/app_state.dart';
 import 'package:verhuurapp/models/toestel.dart';
 import 'package:verhuurapp/models/reservering.dart';
 import 'package:verhuurapp/services/reservering_service.dart';
+
+const _kBlue = Color(0xFF1E88E5);
+const _kBlueLight = Color(0xFFE3F2FD);
 
 class ReserveringMakenScreen extends StatefulWidget {
   final Toestel toestel;
@@ -10,8 +14,7 @@ class ReserveringMakenScreen extends StatefulWidget {
   const ReserveringMakenScreen({super.key, required this.toestel});
 
   @override
-  State<ReserveringMakenScreen> createState() =>
-      _ReserveringMakenScreenState();
+  State<ReserveringMakenScreen> createState() => _ReserveringMakenScreenState();
 }
 
 class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
@@ -19,6 +22,28 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
   DateTime? _startDatum;
   DateTime? _eindDatum;
   bool _isLoading = false;
+  List<Reservering> _bestaandeReserveringen = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _laadBestaandeReserveringen();
+  }
+
+  Future<void> _laadBestaandeReserveringen() async {
+    final reserveringen = await _reserveringService
+        .getActieveReserveringenVoorToestel(widget.toestel.id);
+    setState(() => _bestaandeReserveringen = reserveringen);
+  }
+
+  bool _isDatumGeblokkeerd(DateTime dag) {
+    for (final r in _bestaandeReserveringen) {
+      if (!dag.isBefore(r.startDatum) && !dag.isAfter(r.eindDatum)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   double get _totalePrijs {
     if (_startDatum == null || _eindDatum == null) return 0;
@@ -37,6 +62,13 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
       initialDate: DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
+      selectableDayPredicate: (dag) => !_isDatumGeblokkeerd(dag),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: _kBlue),
+        ),
+        child: child!,
+      ),
     );
     if (datum != null) {
       setState(() {
@@ -63,6 +95,13 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
       initialDate: _startDatum!.add(const Duration(days: 1)),
       firstDate: _startDatum!.add(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 365)),
+      selectableDayPredicate: (dag) => !_isDatumGeblokkeerd(dag),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: _kBlue),
+        ),
+        child: child!,
+      ),
     );
     if (datum != null) {
       setState(() => _eindDatum = datum);
@@ -102,11 +141,13 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Reservering succesvol gemaakt! ✅'),
-            backgroundColor: Colors.green,
+            content: Text('Reservering succesvol gemaakt!'),
+            backgroundColor: _kBlue,
           ),
         );
-        Navigator.pop(context);
+        // Ga terug naar home en switch naar "Mijn huur" tab (index 3)
+        homeTabNotifier.value = 3;
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       if (mounted) {
@@ -122,12 +163,14 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
     }
   }
 
+  String _formatDatum(DateTime d) => '${d.day}/${d.month}/${d.year}';
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reservering maken'),
-        backgroundColor: Colors.green,
+        backgroundColor: _kBlue,
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
@@ -139,7 +182,7 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: _kBlueLight,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -154,11 +197,43 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
                   Text(
                     '€${widget.toestel.prijs.toStringAsFixed(2)} per dag',
                     style: const TextStyle(
-                        color: Colors.green, fontWeight: FontWeight.bold),
+                        color: _kBlue, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
             ),
+            if (_bestaandeReserveringen.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.orange, size: 16),
+                        SizedBox(width: 4),
+                        Text('Al geboekte periodes:',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    ..._bestaandeReserveringen.map((r) => Text(
+                          '• ${_formatDatum(r.startDatum)} → ${_formatDatum(r.eindDatum)}',
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.orange),
+                        )),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             // Startdatum
             ListTile(
@@ -166,12 +241,12 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
                 borderRadius: BorderRadius.circular(8),
                 side: BorderSide(color: Colors.grey.shade300),
               ),
-              leading: const Icon(Icons.calendar_today, color: Colors.green),
+              leading: const Icon(Icons.calendar_today, color: _kBlue),
               title: const Text('Startdatum'),
               subtitle: Text(
                 _startDatum == null
                     ? 'Selecteer een datum'
-                    : '${_startDatum!.day}/${_startDatum!.month}/${_startDatum!.year}',
+                    : _formatDatum(_startDatum!),
               ),
               onTap: _selecteerStartDatum,
             ),
@@ -182,12 +257,12 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
                 borderRadius: BorderRadius.circular(8),
                 side: BorderSide(color: Colors.grey.shade300),
               ),
-              leading: const Icon(Icons.calendar_month, color: Colors.green),
+              leading: const Icon(Icons.calendar_month, color: _kBlue),
               title: const Text('Einddatum'),
               subtitle: Text(
                 _eindDatum == null
                     ? 'Selecteer een datum'
-                    : '${_eindDatum!.day}/${_eindDatum!.month}/${_eindDatum!.year}',
+                    : _formatDatum(_eindDatum!),
               ),
               onTap: _selecteerEindDatum,
             ),
@@ -197,7 +272,7 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: _kBlueLight,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(
@@ -213,15 +288,13 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          'Totale prijs',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        const Text('Totale prijs',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
                         Text(
                           '€${_totalePrijs.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.green,
+                            color: _kBlue,
                             fontSize: 18,
                           ),
                         ),
@@ -234,7 +307,7 @@ class _ReserveringMakenScreenState extends State<ReserveringMakenScreen> {
             ElevatedButton(
               onPressed: _isLoading ? null : _reserveringMaken,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
+                backgroundColor: _kBlue,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(

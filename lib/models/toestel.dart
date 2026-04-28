@@ -10,6 +10,7 @@ class Toestel {
   final String? fotoUrl;
   final double? latitude;
   final double? longitude;
+  final String? adres;
 
   Toestel({
     required this.id,
@@ -23,6 +24,7 @@ class Toestel {
     this.fotoUrl,
     this.latitude,
     this.longitude,
+    this.adres,
   });
 
   // Van Firestore naar Dart object
@@ -39,6 +41,7 @@ class Toestel {
       fotoUrl: data['fotoUrl'],
       latitude: data['latitude']?.toDouble(),
       longitude: data['longitude']?.toDouble(),
+      adres: data['adres'],
     );
   }
 
@@ -55,6 +58,7 @@ class Toestel {
       'fotoUrl': fotoUrl,
       'latitude': latitude,
       'longitude': longitude,
+      'adres': adres,
     };
   }
 }
