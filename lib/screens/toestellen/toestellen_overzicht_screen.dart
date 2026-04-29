@@ -22,12 +22,12 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
 
   final List<String> _categorieen = [
     'Alle',
-    'Stofzuiger',
-    'Grasmaaier',
-    'Keukenmachine',
-    'Boormachine',
-    'Ladder',
-    'Hogedrukreiniger',
+    'Huishouden & Schoonmaak',
+    'Koken & Tafelen',
+    'Computers & Telefoons',
+    'Klussen & Gereedschap',
+    'Gaming & Speelgoed',
+    'Kleding & Kostuums',
     'Andere',
   ];
 

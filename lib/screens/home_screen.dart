@@ -66,7 +66,28 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              await _authService.logout();
+              final bevestigd = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Uitloggen'),
+                  content: const Text('Weet je zeker dat je wilt uitloggen?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Annuleren'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Uitloggen',
+                          style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+              );
+              if (bevestigd == true) {
+                await _authService.logout();
+                // StreamBuilder in main.dart toont automatisch LoginScreen
+              }
             },
           ),
         ],
