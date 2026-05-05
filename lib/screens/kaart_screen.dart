@@ -13,9 +13,7 @@ class KaartScreen extends StatefulWidget {
 
 class _KaartScreenState extends State<KaartScreen> {
   final ToestelService _toestelService = ToestelService();
-  GoogleMapController? _mapController;
   Set<Marker> _markers = {};
-  List<Toestel> _toestellen = [];
 
   static const LatLng _beginPositie = LatLng(50.8503, 4.3517); // Brussel
 
@@ -25,7 +23,6 @@ class _KaartScreenState extends State<KaartScreen> {
     _toestelService.getAlleToestellen().listen((toestellen) {
       if (mounted) {
         setState(() {
-          _toestellen = toestellen;
           _markers = _bouwMarkers(toestellen);
         });
       }
@@ -69,9 +66,7 @@ class _KaartScreenState extends State<KaartScreen> {
           zoom: 12,
         ),
         markers: _markers,
-        onMapCreated: (controller) {
-          _mapController = controller;
-        },
+        onMapCreated: (_) {},
         myLocationButtonEnabled: false,
         zoomControlsEnabled: true,
       ),

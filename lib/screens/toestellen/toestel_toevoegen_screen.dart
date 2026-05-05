@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -10,6 +8,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:verhuurapp/models/toestel.dart';
+import 'package:verhuurapp/services/gebruiker_service.dart';
 import 'package:verhuurapp/services/toestel_service.dart';
 
 const _kBlue = Color(0xFF1E88E5);
@@ -54,9 +53,11 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
   LatLng? _geselecteerdeLocatie;
   String? _geselecteerdeAdresTekst;
   GoogleMapController? _mapController;
+  LatLng? _pendingCameraTarget; // bewaard als kaart nog niet klaar is
+  bool _heeftGebruikersAdres = false; // werd default adres gevonden?
+  final _gebruikerService = GebruikerService();
 
   // Foto
-  File? _fotoFile;
   Uint8List? _fotoBytes;
   final ImagePicker _picker = ImagePicker();
 
@@ -78,6 +79,49 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
         });
       }
     });
+    _laadStandaardAdres();
+  }
+
+  Future<void> _laadStandaardAdres() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final profiel = await _gebruikerService.getProfiel(uid);
+      if (profiel == null || !profiel.heeftLocatie) return;
+      if (!mounted) return;
+      final positie = LatLng(profiel.latitude!, profiel.longitude!);
+      final adresTekst = [profiel.adres, profiel.stad]
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .join(', ');
+      setState(() {
+        _geselecteerdeLocatie = positie;
+        _geselecteerdeAdresTekst = adresTekst.isNotEmpty ? adresTekst : null;
+        _heeftGebruikersAdres = true;
+        if (adresTekst.isNotEmpty) _adresController.text = adresTekst;
+        // Als de kaart al klaar is → meteen bewegen, anders bewaren
+        if (_mapController != null) {
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLngZoom(positie, 15),
+          );
+        } else {
+          _pendingCameraTarget = positie;
+        }
+      });
+    } catch (_) {}
+  }
+
+  void _onMapCreated(GoogleMapController controller) {
+    _mapController = controller;
+    // Als er al een locatie klaarstond (Firestore was sneller dan de kaart)
+    if (_pendingCameraTarget != null) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(_pendingCameraTarget!, 15),
+        );
+        _pendingCameraTarget = null;
+      });
+    }
   }
 
   @override
@@ -94,54 +138,109 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
   // ── Foto ──────────────────────────────────────────────────────────────────
 
   Future<void> _fotoKiezen() async {
+    // Op web: geen keuze (camera via browser werkt anders)
+    if (kIsWeb) {
+      await _fotoPicken(ImageSource.gallery);
+      return;
+    }
+    // Op mobiel/desktop: keuze tonen
+    final keuze = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('Foto toevoegen',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _kBlueLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.camera_alt, color: _kBlue),
+              ),
+              title: const Text('Foto nemen met camera'),
+              subtitle: const Text('Open de camera van je toestel'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _kBlueLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.photo_library, color: _kBlue),
+              ),
+              title: const Text('Kies uit galerij'),
+              subtitle: const Text('Kies een bestaande foto'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (keuze != null) await _fotoPicken(keuze);
+  }
+
+  Future<void> _fotoPicken(ImageSource bron) async {
     final XFile? foto = await _picker.pickImage(
-      source: ImageSource.gallery,
+      source: bron,
       maxWidth: 1024,
       maxHeight: 1024,
       imageQuality: 80,
     );
     if (foto == null) return;
-    // Altijd bytes laden – werkt op web én native
     final bytes = await foto.readAsBytes();
-    setState(() => _fotoBytes = bytes);
-    // Ook File bewaren voor native (voor putFile fallback)
-    if (!kIsWeb) setState(() => _fotoFile = File(foto.path));
+    setState(() {
+      _fotoBytes = bytes;
+    });
   }
 
   bool get _heeftFoto => _fotoBytes != null;
 
-  Future<String?> _fotoUploaden(String toestelId) async {
-    if (_fotoBytes == null) return null;
+  /// Upload foto op de achtergrond – blokkeert de UI NIET.
+  /// Als het lukt, wordt fotoUrl in Firestore bijgewerkt.
+  void _uploadFotoAchtergrond(String toestelId, Uint8List bytes) {
+    Future(() async {
+      try {
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('toestellen')
+            .child('$toestelId.jpg');
 
-    final ref = FirebaseStorage.instance
-        .ref()
-        .child('toestellen')
-        .child('$toestelId.jpg');
+        final snapshot = await ref
+            .putData(bytes, SettableMetadata(contentType: 'image/jpeg'))
+            .timeout(const Duration(seconds: 120));
 
-    try {
-      // Gebruik altijd putData (bytes) – werkt op alle platforms
-      final uploadTask = ref.putData(
-        _fotoBytes!,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-
-      // Wacht max 60 seconden
-      final snapshot = await uploadTask.timeout(
-        const Duration(seconds: 60),
-        onTimeout: () {
-          uploadTask.cancel();
-          throw TimeoutException('Foto upload time-out na 60 seconden.');
-        },
-      );
-
-      if (snapshot.state == TaskState.success) {
-        return await ref.getDownloadURL();
+        if (snapshot.state == TaskState.success) {
+          final url = await ref.getDownloadURL();
+          await _toestelService.toestelUpdaten(toestelId, {'fotoUrl': url});
+          debugPrint('✅ Foto geüpload: $url');
+        }
+      } catch (e) {
+        // Stil falen – toestel is al opgeslagen, foto ontbreekt alleen
+        debugPrint('⚠️ Achtergrond foto upload mislukt: $e');
       }
-      return null;
-    } on FirebaseException catch (e) {
-      debugPrint('Firebase Storage fout: ${e.code} – ${e.message}');
-      rethrow;
-    }
+    });
   }
 
   // ── Adres autocomplete (Nominatim) ────────────────────────────────────────
@@ -160,45 +259,111 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
     });
   }
 
+  /// Detecteer of de query een huisnummer bevat en bouw slimme Nominatim params.
+  /// Nominatim gestructureerde zoekopdracht werkt beter met huisnummers.
+  Map<String, String> _bouwZoekParams(String query) {
+    // Patroon: "Straatnaam HuisNr" of "Straatnaam HuisNr, Stad"
+    // Bijv: "Kapelstraat 5" of "Kapelstraat 5, Antwerpen" of "Kapelstraat 5 Antwerpen"
+    final huisnrRegex = RegExp(
+        r'^(.+?)\s+(\d+[a-zA-Z]?)\s*(?:[,\s]+\s*(.+))?$',
+        caseSensitive: false);
+    final match = huisnrRegex.firstMatch(query.trim());
+
+    if (match != null) {
+      final straat = match.group(1)!.trim();
+      final huisnr = match.group(2)!.trim();
+      final stad = match.group(3)?.trim();
+      // Alleen gestructureerd als de straatnaam minstens 3 tekens heeft
+      if (straat.length >= 3) {
+        return {
+          // Nominatim verwacht huisnummer VOOR straatnaam
+          'street': '$huisnr $straat',
+          if (stad != null && stad.isNotEmpty) 'city': stad,
+          'countrycodes': 'be',
+          'format': 'json',
+          'limit': '8',
+          'addressdetails': '1',
+          'accept-language': 'nl,en',
+        };
+      }
+    }
+
+    // Vrije tekst zoekopdracht (zonder huisnummer of te korte input)
+    return {
+      'q': query,
+      'countrycodes': 'be',
+      'format': 'json',
+      'limit': '8',
+      'addressdetails': '1',
+      'accept-language': 'nl,en',
+    };
+  }
+
   Future<void> _zoekSuggesties(String query) async {
     setState(() => _laadtSuggesties = true);
     try {
-      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': query,
-        'format': 'json',
-        'limit': '6',
-        'addressdetails': '1',
-        'accept-language': 'nl,en',
-      });
+      final params = _bouwZoekParams(query);
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', params);
 
       final response = await http
-          .get(uri, headers: {'User-Agent': 'Lendly-Flutter/1.0 contact@lendly.be'})
+          .get(uri,
+              headers: {
+                'User-Agent': 'Lendly-Flutter/1.0 contact@lendly.be'
+              })
           .timeout(const Duration(seconds: 8));
 
       if (response.statusCode != 200) return;
 
-      final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+      final List<dynamic> data =
+          json.decode(utf8.decode(response.bodyBytes));
 
-      final suggesties = data.map((item) {
-        // Veilig parsen – lat/lon zijn strings in Nominatim
-        final lat = double.tryParse(item['lat']?.toString() ?? '') ?? 0.0;
-        final lon = double.tryParse(item['lon']?.toString() ?? '') ?? 0.0;
+      // Als gestructureerde zoekopdracht geen resultaten geeft → probeer vrij
+      List<dynamic> zoekData = data;
+      if (zoekData.isEmpty && params.containsKey('street')) {
+        final vrij = Uri.https('nominatim.openstreetmap.org', '/search', {
+          'q': query,
+          'countrycodes': 'be',
+          'format': 'json',
+          'limit': '8',
+          'addressdetails': '1',
+          'accept-language': 'nl,en',
+        });
+        final fallback = await http
+            .get(vrij,
+                headers: {
+                  'User-Agent': 'Lendly-Flutter/1.0 contact@lendly.be'
+                })
+            .timeout(const Duration(seconds: 8));
+        if (fallback.statusCode == 200) {
+          zoekData = json.decode(utf8.decode(fallback.bodyBytes));
+        }
+      }
 
+      final suggesties = zoekData.map((item) {
+        final lat =
+            double.tryParse(item['lat']?.toString() ?? '') ?? 0.0;
+        final lon =
+            double.tryParse(item['lon']?.toString() ?? '') ?? 0.0;
         final volledig = item['display_name']?.toString() ?? '';
 
-        // Bouw een kort leesbaar label: "Straat, Stad, Land"
         final addr = item['address'] as Map<String, dynamic>? ?? {};
         final delen = <String>[];
         final straat = addr['road'] ?? addr['street'];
         final huisnr = addr['house_number'];
-        final stad = addr['city'] ?? addr['town'] ?? addr['village'] ?? addr['municipality'];
+        final stad = addr['city'] ??
+            addr['town'] ??
+            addr['village'] ??
+            addr['municipality'];
         final land = addr['country'];
         if (straat != null) {
-          delen.add(huisnr != null ? '$straat $huisnr' : straat as String);
+          delen.add(
+              huisnr != null ? '$straat $huisnr' : straat as String);
         }
         if (stad != null) delen.add(stad as String);
         if (land != null) delen.add(land as String);
-        final kort = delen.isNotEmpty ? delen.join(', ') : volledig.split(',').take(3).join(',');
+        final kort = delen.isNotEmpty
+            ? delen.join(', ')
+            : volledig.split(',').take(3).join(',');
 
         return _AdresSuggestie(volledig, kort, lat, lon);
       }).where((s) => s.lat != 0.0 && s.lon != 0.0).toList();
@@ -253,7 +418,8 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
         naam: _naamController.text.trim(),
         beschrijving: _beschrijvingController.text.trim(),
         categorie: _geselecteerdeCategorie,
-        prijs: double.parse(_prijsController.text.trim()),
+        prijs: double.parse(
+            _prijsController.text.trim().replaceAll(',', '.')),
         beschikbaarheid: 'Beschikbaar',
         verhuurderEmail: user.email!,
         verhuurderUid: user.uid,
@@ -262,48 +428,29 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
         adres: _geselecteerdeAdresTekst ?? _adresController.text.trim(),
       );
 
-      // 1. Toestel opslaan in Firestore
+      // 1. Toestel opslaan in Firestore (snel)
       final toestelId = await _toestelService.toestelToevoegenMetId(toestelData);
 
-      // 2. Foto uploaden (apart proberen – mislukken stopt het opslaan niet)
-      if (_heeftFoto) {
-        try {
-          final fotoUrl = await _fotoUploaden(toestelId);
-          if (fotoUrl != null) {
-            await _toestelService.toestelUpdaten(toestelId, {'fotoUrl': fotoUrl});
-          } else {
-            _toonSnackbar('Toestel opgeslagen, maar foto kon niet worden geüpload.', Colors.orange);
-          }
-        } catch (e) {
-          // Foto upload mislukt → toestel is al opgeslagen zonder foto
-          _toonSnackbar(
-            'Toestel opgeslagen zonder foto. Fout: ${_fotofout(e)}',
-            Colors.orange,
-          );
-        }
-      }
+      // 2. Bewaar foto bytes vóór de reset
+      final fotoBytesKopie = _fotoBytes;
 
+      // 3. Meteen succes tonen + formulier resetten (geen wachttijd meer)
       if (mounted) {
         _toonSnackbar('Toestel succesvol toegevoegd!', _kBlue);
         _resetFormulier();
+        setState(() => _isLoading = false);
+      }
+
+      // 4. Foto uploaden op de achtergrond – UI is al verder
+      if (fotoBytesKopie != null) {
+        _uploadFotoAchtergrond(toestelId, fotoBytesKopie);
       }
     } catch (e) {
       if (mounted) {
         _toonSnackbar('Fout bij opslaan: ${e.toString()}', Colors.red);
+        setState(() => _isLoading = false);
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  String _fotofout(Object e) {
-    if (e is TimeoutException) return 'Upload time-out.';
-    if (e is FirebaseException) {
-      if (e.code == 'unauthorized') return 'Geen toestemming voor Firebase Storage.';
-      if (e.code == 'canceled') return 'Upload geannuleerd.';
-      return 'Firebase fout (${e.code}).';
-    }
-    return e.toString();
   }
 
   void _toonSnackbar(String tekst, Color kleur) {
@@ -321,10 +468,12 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
     setState(() {
       _geselecteerdeLocatie = null;
       _geselecteerdeAdresTekst = null;
-      _fotoFile = null;
       _fotoBytes = null;
       _geselecteerdeCategorie = _categorieen.first;
+      _heeftGebruikersAdres = false;
     });
+    // Herlaad standaard adres na reset
+    _laadStandaardAdres();
     _mapController?.animateCamera(
       CameraUpdate.newLatLngZoom(_beginPositie, 12),
     );
@@ -458,6 +607,27 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
                 const Text('Locatie *',
                     style: TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold)),
+                if (!_heeftGebruikersAdres) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 14, color: Colors.orange),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: const Text(
+                            'Geen standaard adres gevonden. Stel je adres in via je profiel.',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 8),
 
                 // Adres tekstveld
@@ -611,7 +781,7 @@ class _ToestelToevoegenScreenState extends State<ToestelToevoegenScreen> {
                         target: _beginPositie,
                         zoom: 12,
                       ),
-                      onMapCreated: (c) => _mapController = c,
+                      onMapCreated: _onMapCreated,
                       markers: _geselecteerdeLocatie == null
                           ? {}
                           : {

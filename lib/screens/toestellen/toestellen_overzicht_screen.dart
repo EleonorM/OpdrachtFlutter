@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:verhuurapp/models/toestel.dart';
+import 'package:verhuurapp/models/gebruiker.dart';
 import 'package:verhuurapp/services/toestel_service.dart';
+import 'package:verhuurapp/services/gebruiker_service.dart';
 import 'package:verhuurapp/screens/toestellen/toestel_detail_screen.dart';
 
 const _kBlue = Color(0xFF1E88E5);
@@ -19,6 +23,7 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
   final TextEditingController _zoekController = TextEditingController();
   String _geselecteerdeCategorie = 'Alle';
   String _zoekTekst = '';
+  Gebruiker? _gebruiker;
 
   final List<String> _categorieen = [
     'Alle',
@@ -32,9 +37,43 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _laadGebruiker();
+  }
+
+  Future<void> _laadGebruiker() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      try {
+        final profiel = await GebruikerService().getProfiel(uid);
+        if (mounted) setState(() => _gebruiker = profiel);
+      } catch (_) {}
+    }
+  }
+
+  @override
   void dispose() {
     _zoekController.dispose();
     super.dispose();
+  }
+
+  String? _berekenAfstand(Toestel toestel) {
+    if (_gebruiker == null || !_gebruiker!.heeftLocatie) return null;
+    if (toestel.latitude == null || toestel.longitude == null) return null;
+
+    final meters = Geolocator.distanceBetween(
+      _gebruiker!.latitude!,
+      _gebruiker!.longitude!,
+      toestel.latitude!,
+      toestel.longitude!,
+    );
+
+    if (meters < 1000) {
+      return '${meters.round()} m';
+    } else {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
   }
 
   List<Toestel> _filterToestellen(List<Toestel> alle) {
@@ -43,7 +82,7 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
       if (t.beschikbaarheid != 'Beschikbaar') return false;
       // Categorie filter
       if (_geselecteerdeCategorie != 'Alle' &&
-          t.categorie != _geselecteerdeCategorie) return false;
+          t.categorie != _geselecteerdeCategorie) { return false; }
       // Zoekbalk filter
       if (_zoekTekst.isNotEmpty &&
           !t.naam.toLowerCase().contains(_zoekTekst.toLowerCase()) &&
@@ -69,7 +108,7 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 hintText: 'Zoek een toestel...',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
                 prefixIcon: const Icon(Icons.search, color: Colors.white),
                 suffixIcon: _zoekTekst.isNotEmpty
                     ? IconButton(
@@ -81,7 +120,7 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
                       )
                     : null,
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.2),
+                fillColor: Colors.white.withValues(alpha: 0.2),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -162,7 +201,10 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
                   itemCount: gefilterd.length,
                   itemBuilder: (context, index) {
                     final toestel = gefilterd[index];
-                    return _ToestelKaart(toestel: toestel);
+                    return _ToestelKaart(
+                      toestel: toestel,
+                      afstand: _berekenAfstand(toestel),
+                    );
                   },
                 );
               },
@@ -176,8 +218,9 @@ class _ToestellenOverzichtScreenState extends State<ToestellenOverzichtScreen> {
 
 class _ToestelKaart extends StatelessWidget {
   final Toestel toestel;
+  final String? afstand;
 
-  const _ToestelKaart({required this.toestel});
+  const _ToestelKaart({required this.toestel, this.afstand});
 
   @override
   Widget build(BuildContext context) {
@@ -200,20 +243,56 @@ class _ToestelKaart extends StatelessWidget {
             // Foto
             Expanded(
               flex: 3,
-              child: toestel.fotoUrl != null
-                  ? Image.network(
-                      toestel.fotoUrl!,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, progress) {
-                        if (progress == null) return child;
-                        return Container(
-                          color: const Color(0xFFE3F2FD),
-                          child: const Center(child: CircularProgressIndicator()),
-                        );
-                      },
-                      errorBuilder: (_, __, ___) => _fotoPlaceholder(),
-                    )
-                  : _fotoPlaceholder(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  toestel.fotoUrl != null
+                      ? Image.network(
+                          toestel.fotoUrl!,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return Container(
+                              color: const Color(0xFFE3F2FD),
+                              child: const Center(
+                                  child: CircularProgressIndicator()),
+                            );
+                          },
+                          errorBuilder: (_, __, ___) => _fotoPlaceholder(),
+                        )
+                      : _fotoPlaceholder(),
+                  // Afstand badge
+                  if (afstand != null)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.near_me,
+                                size: 11, color: Colors.white),
+                            const SizedBox(width: 3),
+                            Text(
+                              afstand!,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
             // Info
             Expanded(
